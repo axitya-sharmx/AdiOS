@@ -1,5 +1,15 @@
+/* Buddy allocator over a single physical memory region (spec section 13).
+ *
+ * g_page_order[i] doubles as both the free/allocated bit and, when free,
+ * the order of the block starting at page i: PMM_ORDER_FREE_NONE means
+ * "not a free block head" (either allocated, or the interior of a larger
+ * free block). That single byte per page is what lets pmm_free() find a
+ * buddy and decide in O(1) whether it can coalesce with it.
+ */
 #include "pmm.h"
 #include "multiboot2.h"
+
+_Static_assert((PMM_PAGE_SIZE & (PMM_PAGE_SIZE - 1)) == 0, "PMM_PAGE_SIZE must be a power of two");
 
 /* Bounds the static bookkeeping array. Also keeps the managed region well
  * inside the boot identity map (first 1 GiB, see boot.S). NUMA and
@@ -9,6 +19,7 @@
 #define PMM_MAX_PAGES (PMM_MANAGED_CAP_BYTES / PMM_PAGE_SIZE)
 
 #define PMM_ORDER_FREE_NONE 0xFF
+_Static_assert(PMM_MAX_ORDER < PMM_ORDER_FREE_NONE, "PMM_ORDER_FREE_NONE must not collide with a real order");
 
 struct free_block {
     struct free_block *prev;
@@ -133,15 +144,24 @@ uint64_t pmm_alloc(uint32_t order) {
 }
 
 void pmm_free(uint64_t addr, uint32_t order) {
+    /* Guard the trust boundary: a bad (addr, order) from a caller bug must
+     * not corrupt g_page_order/free-list state for unrelated blocks. */
+    if (order > PMM_MAX_ORDER || addr < g_base || (addr - g_base) % block_bytes(order) != 0 ||
+        page_index(addr) + ((uint64_t)1 << order) > g_page_count) {
+        return;
+    }
+
     /* Only the freed block's own bytes are newly free; any buddy we
      * coalesce with was already free and already counted. */
     g_free_bytes += block_bytes(order);
 
     while (order < PMM_MAX_ORDER) {
-        uint64_t buddy = (addr - g_base) ^ block_bytes(order);
-        buddy += g_base;
+        /* Buddy blocks differ by exactly one bit at their own order's
+         * position, so XOR-ing that bit into the region-relative offset
+         * gives the buddy's offset directly. */
+        uint64_t buddy = g_base + ((addr - g_base) ^ block_bytes(order));
 
-        if (buddy < g_base || page_index(buddy) >= g_page_count) {
+        if (page_index(buddy) >= g_page_count) {
             break;
         }
         if (g_page_order[page_index(buddy)] != order) {
