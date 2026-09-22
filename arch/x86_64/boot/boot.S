@@ -44,6 +44,11 @@ _start:
     mov $stack_top, %esp
     mov %esp, %ebp
 
+    /* ebx holds the (32-bit) physical address of the multiboot2 info
+       struct; force a zero-extending 32-bit write so the full 64-bit
+       rbx is well-defined once we reach long mode. */
+    mov %ebx, %ebx
+
     /* identity-map the first 1 GiB with 2 MiB pages */
     mov $p3_table, %eax
     or $0b11, %eax
@@ -96,6 +101,7 @@ long_mode_start:
     mov %ax, %gs
 
     mov $stack_top, %rsp
+    mov %rbx, %rdi
     call kernel_main
 
 hang:
