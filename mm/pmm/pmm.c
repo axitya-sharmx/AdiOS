@@ -133,6 +133,10 @@ uint64_t pmm_alloc(uint32_t order) {
 }
 
 void pmm_free(uint64_t addr, uint32_t order) {
+    /* Only the freed block's own bytes are newly free; any buddy we
+     * coalesce with was already free and already counted. */
+    g_free_bytes += block_bytes(order);
+
     while (order < PMM_MAX_ORDER) {
         uint64_t buddy = (addr - g_base) ^ block_bytes(order);
         buddy += g_base;
@@ -152,7 +156,6 @@ void pmm_free(uint64_t addr, uint32_t order) {
     }
 
     list_push(order, addr);
-    g_free_bytes += block_bytes(order);
 }
 
 uint64_t pmm_free_bytes(void) {
