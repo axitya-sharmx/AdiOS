@@ -9,6 +9,11 @@
 #include "pmm.h"
 #include "multiboot2.h"
 
+/* Provided by linker/linker.ld: the physical range this kernel image
+ * (code, rodata, data, bss, boot page tables/stack) actually occupies. */
+extern char _kernel_start[];
+extern char _kernel_end[];
+
 _Static_assert((PMM_PAGE_SIZE & (PMM_PAGE_SIZE - 1)) == 0, "PMM_PAGE_SIZE must be a power of two");
 
 /* Bounds the static bookkeeping array. Also keeps the managed region well
@@ -112,7 +117,29 @@ int pmm_init(uint64_t mb_info_addr) {
         g_free_list[o] = 0;
     }
 
-    add_free_region(base, len);
+    /* The Multiboot2 memory map only describes raw RAM availability — it
+     * has no idea GRUB loaded us somewhere inside it. Carve the kernel's
+     * own physical footprint out of the region before handing any of it
+     * out, or pmm_alloc will eventually return a page that's still our
+     * code, stack, or page tables. */
+    uint64_t kstart = (uint64_t)_kernel_start & ~(uint64_t)(PMM_PAGE_SIZE - 1);
+    uint64_t kend = ((uint64_t)_kernel_end + PMM_PAGE_SIZE - 1) & ~(uint64_t)(PMM_PAGE_SIZE - 1);
+
+    uint64_t region_end = base + len;
+    uint64_t overlap_start = kstart > base ? kstart : base;
+    uint64_t overlap_end = kend < region_end ? kend : region_end;
+
+    if (overlap_start < overlap_end) {
+        if (overlap_start > base) {
+            add_free_region(base, overlap_start - base);
+        }
+        if (overlap_end < region_end) {
+            add_free_region(overlap_end, region_end - overlap_end);
+        }
+    } else {
+        add_free_region(base, len);
+    }
+
     return 1;
 }
 
