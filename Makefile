@@ -8,6 +8,7 @@ ASFLAGS := -c
 LDFLAGS := -T linker/linker.ld -ffreestanding -O2 -nostdlib -static
 
 C_SOURCES := kernel/init/main.c kernel/logging/serial.c kernel/logging/log.c kernel/core/string.c \
+             kernel/panic/panic.c \
              arch/x86_64/cpu/gdt.c arch/x86_64/cpu/percpu.c \
              arch/x86_64/interrupts/idt.c arch/x86_64/interrupts/isr.c \
              mm/pmm/multiboot2.c mm/pmm/pmm.c
