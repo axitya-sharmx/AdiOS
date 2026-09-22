@@ -7,6 +7,8 @@
 #include "../../mm/vmm/vmm.h"
 #include "../heap/heap.h"
 #include "../../arch/x86_64/time/pit.h"
+#include "../../process/thread/thread.h"
+#include "../../process/scheduler/scheduler.h"
 
 static void serial_write_uint(uint64_t v) {
     char buf[21];
@@ -133,6 +135,36 @@ static int timer_self_test(void) {
     return 0;
 }
 
+/* Three worker threads each increment their own counter 20 times,
+ * yielding after each increment; the bootstrap thread (this call stack)
+ * yields in a loop until they're all done. If round-robin scheduling and
+ * context switching both work, every counter reaches exactly 20 — a
+ * stuck or duplicated thread would leave one short or over. */
+static void counter_worker(void *arg) {
+    volatile int *counter = arg;
+    for (int i = 0; i < 20; i++) {
+        (*counter)++;
+        scheduler_yield();
+    }
+}
+
+static int scheduler_self_test(void) {
+    scheduler_init();
+
+    volatile int counters[3] = {0, 0, 0};
+    if (!thread_create(counter_worker, (void *)&counters[0]) ||
+        !thread_create(counter_worker, (void *)&counters[1]) ||
+        !thread_create(counter_worker, (void *)&counters[2])) {
+        return 0;
+    }
+
+    for (int i = 0; i < 200; i++) {
+        scheduler_yield();
+    }
+
+    return counters[0] == 20 && counters[1] == 20 && counters[2] == 20;
+}
+
 void kernel_main(uint64_t multiboot_info_addr) {
     serial_init();
     serial_write("[BOOT] Kernel starting\n");
@@ -183,6 +215,12 @@ void kernel_main(uint64_t multiboot_info_addr) {
         serial_write("[IRQ ] timer self-test passed\n");
     } else {
         serial_write("[IRQ ] timer self-test FAILED\n");
+    }
+
+    if (scheduler_self_test()) {
+        serial_write("[SCHD] round-robin self-test passed\n");
+    } else {
+        serial_write("[SCHD] round-robin self-test FAILED\n");
     }
 
     serial_write("[INIT] Kernel initialized\n");
