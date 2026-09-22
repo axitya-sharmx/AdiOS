@@ -8,8 +8,9 @@ boundaries. Full design goals, principles, and phased roadmap are in
 
 ## Status
 
-Phase 0 — development foundation. Repository skeleton is in place; toolchain,
-CI, and boot smoke tests are not yet set up (see spec section 8).
+Phase 1 — kernel bring-up. The kernel boots via GRUB/Multiboot2 on BIOS,
+transitions to long mode, and logs to the serial console. CI builds the ISO
+and boots it in QEMU on every push, asserting on the serial output.
 
 ## Layout
 
@@ -19,11 +20,13 @@ Top-level directories follow the spec's repository structure (section 6):
 
 ## Build
 
-```
-make
-```
+Requires `gcc`, `grub-mkrescue` (grub-pc-bin, xorriso, mtools) and, to run it,
+`qemu-system-x86_64`.
 
-Not yet functional — cross compiler and image generation come first (Phase 0).
+```
+make iso   # build build/adios.iso
+make run   # build and boot in QEMU, serial output to stdout
+```
 
 ## Contributing
 
