@@ -12,6 +12,7 @@
 #include "../../arch/x86_64/syscall/syscall.h"
 #include "../object/object.h"
 #include "../../security/handles/handle.h"
+#include "../../sync/spinlock/spinlock.h"
 
 static void serial_write_uint(uint64_t v) {
     char buf[21];
@@ -243,6 +244,34 @@ static int handle_self_test(void) {
     return 1;
 }
 
+/* No SMP yet, so this can't test real contention — it checks the state
+ * machine: starts free, acquire flips it held, a second try_acquire
+ * correctly fails while held, release flips it back free, and a fresh
+ * acquire succeeds again afterward. */
+static int spinlock_self_test(void) {
+    struct spinlock lock;
+    spinlock_init(&lock);
+
+    if (!spinlock_try_acquire(&lock)) {
+        return 0; /* should have been free */
+    }
+    if (spinlock_try_acquire(&lock)) {
+        return 0; /* already held: must not succeed again */
+    }
+
+    spinlock_release(&lock);
+
+    if (!spinlock_try_acquire(&lock)) {
+        return 0; /* should be free again after release */
+    }
+    spinlock_release(&lock);
+
+    spinlock_acquire(&lock); /* blocking path, uncontended: must not hang */
+    spinlock_release(&lock);
+
+    return 1;
+}
+
 void kernel_main(uint64_t multiboot_info_addr) {
     serial_init();
     serial_write("[BOOT] Kernel starting\n");
@@ -311,6 +340,12 @@ void kernel_main(uint64_t multiboot_info_addr) {
         serial_write("[HNDL] handle/capability self-test passed\n");
     } else {
         serial_write("[HNDL] handle/capability self-test FAILED\n");
+    }
+
+    if (spinlock_self_test()) {
+        serial_write("[SYNC] spinlock self-test passed\n");
+    } else {
+        serial_write("[SYNC] spinlock self-test FAILED\n");
     }
 
     serial_write("[INIT] Kernel initialized\n");
