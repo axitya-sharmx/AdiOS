@@ -1,6 +1,18 @@
 #include "../logging/serial.h"
 #include "../../arch/x86_64/cpu/gdt.h"
+#include "../../arch/x86_64/cpu/percpu.h"
 #include "../../arch/x86_64/interrupts/idt.h"
+
+static void serial_write_uint(uint32_t v) {
+    char buf[11];
+    int i = 10;
+    buf[i] = '\0';
+    do {
+        buf[--i] = '0' + (v % 10);
+        v /= 10;
+    } while (v);
+    serial_write(&buf[i]);
+}
 
 void kernel_main(void) {
     serial_init();
@@ -12,6 +24,11 @@ void kernel_main(void) {
 
     idt_init();
     serial_write("[CPU ] IDT loaded, exceptions installed\n");
+
+    percpu_init(0);
+    serial_write("[CPU ] per-CPU state ready, cpu_id=");
+    serial_write_uint(percpu_current()->cpu_id);
+    serial_write("\n");
 
     serial_write("[INIT] Kernel initialized\n");
 
