@@ -10,7 +10,8 @@ LDFLAGS := -T linker/linker.ld -ffreestanding -O2 -nostdlib -static
 C_SOURCES := kernel/init/main.c kernel/logging/serial.c \
              arch/x86_64/cpu/gdt.c arch/x86_64/cpu/percpu.c \
              arch/x86_64/interrupts/idt.c arch/x86_64/interrupts/isr.c \
-             mm/pmm/multiboot2.c mm/pmm/pmm.c mm/vmm/vmm.c kernel/heap/heap.c
+             mm/pmm/multiboot2.c mm/pmm/pmm.c mm/vmm/vmm.c kernel/heap/heap.c \
+             sync/spinlock/spinlock.c
 ASM_SOURCES := arch/x86_64/boot/boot.S arch/x86_64/interrupts/isr_stubs.S
 
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SOURCES)) \
@@ -19,7 +20,7 @@ OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SOURCES)) \
 KERNEL := $(BUILD_DIR)/kernel.elf
 ISO := $(BUILD_DIR)/adios.iso
 
-.PHONY: all iso run clean
+.PHONY: all iso run test clean
 
 all: $(KERNEL)
 
@@ -48,6 +49,13 @@ run: iso
 iso-fault-test:
 	$(MAKE) clean
 	$(MAKE) iso CFLAGS="$(CFLAGS) -DTRIGGER_TEST_FAULT"
+
+test: $(BUILD_DIR)/test_spinlock
+	$(BUILD_DIR)/test_spinlock
+
+$(BUILD_DIR)/test_spinlock: tests/unit/test_spinlock.c sync/spinlock/spinlock.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -Wall -Wextra -o $@ $^
 
 clean:
 	rm -rf $(BUILD_DIR)
