@@ -57,6 +57,37 @@ static uint64_t heap_extend_pages(uint64_t count) {
     return start;
 }
 
+/* Links `bp`, a block of bp->s.size units, into the free list, coalescing
+ * with whichever neighbor(s) it's adjacent to. This is kfree()'s actual
+ * K&R free-list logic, factored out so morecore() can use it directly:
+ * a block it just carved out of fresh PMM/VMM memory was never handed out
+ * by kmalloc, so it was never magic-tagged, and kfree()'s double-free
+ * guard would (correctly, for any real caller) reject it. */
+static void free_list_insert(Header *bp) {
+    Header *p;
+    for (p = freep; !(bp > p && bp < p->s.next); p = p->s.next) {
+        if (p >= p->s.next && (bp > p || bp < p->s.next)) {
+            break; /* bp is above the highest, or below the lowest, free block */
+        }
+    }
+
+    if (bp + bp->s.size == p->s.next) {
+        bp->s.size += p->s.next->s.size;
+        bp->s.next = p->s.next->s.next;
+    } else {
+        bp->s.next = p->s.next;
+    }
+
+    if (p + p->s.size == bp) {
+        p->s.size += bp->s.size;
+        p->s.next = bp->s.next;
+    } else {
+        p->s.next = bp;
+    }
+
+    freep = p;
+}
+
 static Header *morecore(size_t nunits) {
     if (nunits < NALLOC) {
         nunits = NALLOC;
@@ -72,7 +103,7 @@ static Header *morecore(size_t nunits) {
 
     Header *up = (Header *)region;
     up->s.size = (pages * PMM_PAGE_SIZE) / sizeof(Header);
-    kfree((void *)(up + 1));
+    free_list_insert(up);
     return freep;
 }
 
@@ -121,26 +152,5 @@ void kfree(void *ap) {
     }
     bp->s.magic = 0;
 
-    Header *p;
-    for (p = freep; !(bp > p && bp < p->s.next); p = p->s.next) {
-        if (p >= p->s.next && (bp > p || bp < p->s.next)) {
-            break; /* bp is above the highest, or below the lowest, free block */
-        }
-    }
-
-    if (bp + bp->s.size == p->s.next) {
-        bp->s.size += p->s.next->s.size;
-        bp->s.next = p->s.next->s.next;
-    } else {
-        bp->s.next = p->s.next;
-    }
-
-    if (p + p->s.size == bp) {
-        p->s.size += bp->s.size;
-        p->s.next = bp->s.next;
-    } else {
-        p->s.next = bp;
-    }
-
-    freep = p;
+    free_list_insert(bp);
 }
