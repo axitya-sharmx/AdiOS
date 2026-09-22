@@ -37,4 +37,5 @@ jobs:
           cat fault.log
 
       - name: Check fault dump
-        run: grep -q "Reason: Breakpoint" fault.log
+        run: |
+          grep -q "Reason: Breakpoint" fault.log
