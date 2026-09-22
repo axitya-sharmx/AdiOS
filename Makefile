@@ -50,15 +50,20 @@ iso-fault-test:
 	$(MAKE) clean
 	$(MAKE) iso CFLAGS="$(CFLAGS) -DTRIGGER_TEST_FAULT"
 
-test: $(BUILD_DIR)/test_string $(BUILD_DIR)/test_log
+test: $(BUILD_DIR)/test_string $(BUILD_DIR)/test_log $(BUILD_DIR)/test_list
 	$(BUILD_DIR)/test_string
 	$(BUILD_DIR)/test_log
+	$(BUILD_DIR)/test_list
 
 $(BUILD_DIR)/test_string: tests/unit/test_string.c kernel/core/string.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -Wall -Wextra -o $@ $^
 
 $(BUILD_DIR)/test_log: tests/unit/test_log.c kernel/logging/log.c kernel/logging/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -Wall -Wextra -o $@ $^
+
+$(BUILD_DIR)/test_list: tests/unit/test_list.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -Wall -Wextra -o $@ $^
 
