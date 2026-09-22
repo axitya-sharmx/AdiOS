@@ -15,6 +15,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y grub-pc-bin grub-common xorriso mtools qemu-system-x86
 
+      - name: Run host unit tests
+        run: make test
+
       - name: Build ISO
         run: make iso
 
