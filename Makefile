@@ -64,9 +64,10 @@ iso-fault-test:
 	$(MAKE) clean
 	$(MAKE) iso CFLAGS="$(CFLAGS) -DTRIGGER_TEST_FAULT"
 
-test: $(BUILD_DIR)/test_spinlock $(BUILD_DIR)/test_spinlock_guard
+test: $(BUILD_DIR)/test_spinlock $(BUILD_DIR)/test_spinlock_guard $(BUILD_DIR)/test_span
 	$(BUILD_DIR)/test_spinlock
 	$(BUILD_DIR)/test_spinlock_guard
+	$(BUILD_DIR)/test_span
 
 $(BUILD_DIR)/test_spinlock: tests/unit/test_spinlock.c sync/spinlock/spinlock.c
 	@mkdir -p $(BUILD_DIR)
@@ -76,6 +77,10 @@ $(BUILD_DIR)/test_spinlock_guard: tests/unit/test_spinlock_guard.cpp sync/spinlo
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -Wall -Wextra -c sync/spinlock/spinlock.c -o $(BUILD_DIR)/host_spinlock.o
 	$(CXX) -std=c++20 -Wall -Wextra tests/unit/test_spinlock_guard.cpp $(BUILD_DIR)/host_spinlock.o -o $@
+
+$(BUILD_DIR)/test_span: tests/unit/test_span.cpp kernel/core/span.hpp
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) -std=c++20 -Wall -Wextra tests/unit/test_span.cpp -o $@
 
 clean:
 	rm -rf $(BUILD_DIR)
