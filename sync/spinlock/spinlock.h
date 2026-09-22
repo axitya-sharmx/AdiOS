@@ -13,6 +13,10 @@ typedef struct {
 
 #define SPINLOCK_INIT { .locked = 0 }
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void spinlock_init(spinlock_t *lock);
 
 /* Plain lock/unlock: only safe if the caller knows interrupts are already
@@ -27,3 +31,7 @@ int spinlock_try_lock(spinlock_t *lock); /* returns 1 if acquired, 0 if not */
  * interrupt state rather than unconditionally re-enabling interrupts). */
 unsigned long spinlock_lock_irqsave(spinlock_t *lock);
 void spinlock_unlock_irqrestore(spinlock_t *lock, unsigned long flags);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
