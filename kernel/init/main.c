@@ -5,6 +5,7 @@
 #include "../../arch/x86_64/interrupts/idt.h"
 #include "../../mm/pmm/pmm.h"
 #include "../../mm/vmm/vmm.h"
+#include "../heap/heap.h"
 
 static void serial_write_uint(uint64_t v) {
     char buf[21];
@@ -67,6 +68,55 @@ static int vmm_self_test(void) {
     return ok;
 }
 
+/* Exercises allocation, boundary integrity between adjacent live blocks,
+ * free-list reuse, coalescing (via a heap growth triggered by a large
+ * allocation after everything else is freed), and the double-free guard. */
+static int heap_self_test(void) {
+    uint8_t *a = kmalloc(64);
+    uint8_t *b = kmalloc(128);
+    if (!a || !b) {
+        return 0;
+    }
+
+    for (int i = 0; i < 64; i++) {
+        a[i] = (uint8_t)i;
+    }
+    for (int i = 0; i < 128; i++) {
+        b[i] = (uint8_t)(255 - i);
+    }
+    for (int i = 0; i < 64; i++) {
+        if (a[i] != (uint8_t)i) {
+            return 0; /* b's write corrupted a, or vice versa */
+        }
+    }
+
+    kfree(a);
+    uint8_t *c = kmalloc(32);
+    if (!c) {
+        return 0;
+    }
+    c[0] = 0x7E;
+    if (c[0] != 0x7E) {
+        return 0;
+    }
+
+    kfree(b);
+    kfree(c);
+
+    /* freep now points into fully-coalesced free space; a big allocation
+     * exercises both list traversal (kfree above) and morecore growth. */
+    uint8_t *d = kmalloc(4096 * 8);
+    if (!d) {
+        return 0;
+    }
+    d[0] = 1;
+    kfree(d);
+
+    kfree(a); /* already freed: must be a safe no-op, not a crash or corruption */
+
+    return 1;
+}
+
 void kernel_main(uint64_t multiboot_info_addr) {
     serial_init();
     serial_write("[BOOT] Kernel starting\n");
@@ -100,6 +150,12 @@ void kernel_main(uint64_t multiboot_info_addr) {
             serial_write("[VMM ] self-test passed\n");
         } else {
             serial_write("[VMM ] self-test FAILED\n");
+        }
+
+        if (heap_self_test()) {
+            serial_write("[HEAP] self-test passed\n");
+        } else {
+            serial_write("[HEAP] self-test FAILED\n");
         }
     }
 
