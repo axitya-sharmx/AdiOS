@@ -444,13 +444,11 @@ void kernel_main(uint64_t multiboot_info_addr) {
         serial_write("[SYNC] spinlock self-test FAILED\n");
     }
 
-    serial_write("[ELF ] DEBUG marker A\n");
     if (elf_self_test()) {
         serial_write("[ELF ] loader self-test passed\n");
     } else {
         serial_write("[ELF ] loader self-test FAILED\n");
     }
-    serial_write("[ELF ] DEBUG marker B\n");
 
     serial_write("[INIT] Kernel initialized\n");
 

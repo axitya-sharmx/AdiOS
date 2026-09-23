@@ -18,12 +18,6 @@ jobs:
       - name: Build ISO
         run: make iso
 
-      - name: Diagnose ELF headers (temporary)
-        run: |
-          readelf -S build/kernel.elf
-          nm build/kernel.elf | grep -i 'multiboot\|_start\b'
-          xxd build/kernel.elf | head -20
-
       - name: Boot in QEMU and capture serial log
         run: |
           timeout 20 qemu-system-x86_64 -cdrom build/adios.iso -serial file:serial.log \
