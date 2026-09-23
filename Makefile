@@ -7,7 +7,7 @@ CFLAGS := -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -mno-red-zon
 ASFLAGS := -c
 LDFLAGS := -T linker/linker.ld -ffreestanding -O2 -nostdlib -static
 
-C_SOURCES := kernel/init/main.c kernel/logging/serial.c kernel/core/string.c \
+C_SOURCES := kernel/init/main.c kernel/logging/serial.c kernel/logging/log.c kernel/core/string.c \
              arch/x86_64/cpu/gdt.c arch/x86_64/cpu/percpu.c \
              arch/x86_64/interrupts/idt.c arch/x86_64/interrupts/isr.c \
              mm/pmm/multiboot2.c mm/pmm/pmm.c
@@ -49,10 +49,17 @@ iso-fault-test:
 	$(MAKE) clean
 	$(MAKE) iso CFLAGS="$(CFLAGS) -DTRIGGER_TEST_FAULT"
 
-test:
-	@mkdir -p $(BUILD_DIR)
-	$(CC) -Wall -Wextra -o $(BUILD_DIR)/test_string tests/unit/test_string.c kernel/core/string.c
+test: $(BUILD_DIR)/test_string $(BUILD_DIR)/test_log
 	$(BUILD_DIR)/test_string
+	$(BUILD_DIR)/test_log
+
+$(BUILD_DIR)/test_string: tests/unit/test_string.c kernel/core/string.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -Wall -Wextra -o $@ $^
+
+$(BUILD_DIR)/test_log: tests/unit/test_log.c kernel/logging/log.c kernel/logging/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -Wall -Wextra -o $@ $^
 
 clean:
 	rm -rf $(BUILD_DIR)
