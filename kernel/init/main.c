@@ -6,6 +6,7 @@
 #include "../../mm/pmm/pmm.h"
 #include "../../mm/vmm/vmm.h"
 #include "../heap/heap.h"
+#include "../../arch/x86_64/time/pit.h"
 
 static void serial_write_uint(uint64_t v) {
     char buf[21];
@@ -117,6 +118,21 @@ static int heap_self_test(void) {
     return 1;
 }
 
+/* Confirms the PIT is actually firing IRQ0 and reaching pit_irq(): spins
+ * (with interrupts enabled, hlt-ing between checks) until the tick count
+ * advances by at least 3, bounded so a dead timer fails fast instead of
+ * hanging CI. */
+static int timer_self_test(void) {
+    uint64_t start = pit_ticks();
+    for (int spins = 0; spins < 10000000; spins++) {
+        if (pit_ticks() - start >= 3) {
+            return 1;
+        }
+        __asm__ volatile("hlt");
+    }
+    return 0;
+}
+
 void kernel_main(uint64_t multiboot_info_addr) {
     serial_init();
     serial_write("[BOOT] Kernel starting\n");
@@ -157,6 +173,16 @@ void kernel_main(uint64_t multiboot_info_addr) {
         } else {
             serial_write("[HEAP] self-test FAILED\n");
         }
+    }
+
+    pit_init(100);
+    __asm__ volatile("sti");
+    serial_write("[IRQ ] PIC remapped, PIT at 100 Hz, interrupts enabled\n");
+
+    if (timer_self_test()) {
+        serial_write("[IRQ ] timer self-test passed\n");
+    } else {
+        serial_write("[IRQ ] timer self-test FAILED\n");
     }
 
     serial_write("[INIT] Kernel initialized\n");

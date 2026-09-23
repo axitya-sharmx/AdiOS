@@ -1,4 +1,5 @@
 #include "idt.h"
+#include "pic.h"
 #include <stdint.h>
 
 struct idt_entry {
@@ -24,6 +25,7 @@ static struct idt_entry g_idt[IDT_ENTRIES];
 static struct idt_pointer g_idt_ptr;
 
 extern void *isr_stub_table[32];
+extern void *irq_stub_table[16];
 
 static void idt_set_gate(int vector, void (*handler)(void)) {
     uint64_t addr = (uint64_t)handler;
@@ -41,9 +43,14 @@ void idt_init(void) {
     for (int i = 0; i < 32; i++) {
         idt_set_gate(i, (void (*)(void))isr_stub_table[i]);
     }
+    for (int i = 0; i < 16; i++) {
+        idt_set_gate(PIC1_VECTOR_OFFSET + i, (void (*)(void))irq_stub_table[i]);
+    }
 
     g_idt_ptr.limit = sizeof(g_idt) - 1;
     g_idt_ptr.base = (uint64_t)&g_idt;
 
     __asm__ volatile("lidt (%0)" : : "r"(&g_idt_ptr));
+
+    pic_remap();
 }
