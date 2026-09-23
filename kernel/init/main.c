@@ -4,6 +4,7 @@
 #include "../../arch/x86_64/cpu/percpu.h"
 #include "../../arch/x86_64/interrupts/idt.h"
 #include "../../mm/pmm/pmm.h"
+#include "../../mm/vmm/vmm.h"
 
 static void serial_write_uint(uint64_t v) {
     char buf[21];
@@ -36,6 +37,36 @@ static int pmm_self_test(void) {
     return pmm_free_bytes() == before;
 }
 
+/* Maps a freshly allocated physical page at a virtual address boot.S never
+ * touched (0x40000000 is past the 1 GiB boot.S identity-maps with huge
+ * pages, so this exercises vmm_map actually building new PDPT/PD/PT
+ * levels, not just reusing the boot mapping). Writes through the new
+ * virtual address, reads the same byte back via the page's physical
+ * identity mapping to confirm it lands in the right place, then unmaps
+ * and checks the translation is gone. */
+static int vmm_self_test(void) {
+    const uint64_t test_virt = 0x40000000ULL;
+    const uint8_t marker = 0xA5;
+
+    uint64_t phys = pmm_alloc(0);
+    if (!phys) {
+        return 0;
+    }
+
+    int ok = 1;
+    ok &= vmm_map(test_virt, phys, VMM_WRITABLE);
+    ok &= (vmm_translate(test_virt) == phys);
+
+    *(volatile uint8_t *)test_virt = marker;
+    ok &= (*(volatile uint8_t *)phys == marker);
+
+    vmm_unmap(test_virt);
+    ok &= (vmm_translate(test_virt) == 0);
+
+    pmm_free(phys, 0);
+    return ok;
+}
+
 void kernel_main(uint64_t multiboot_info_addr) {
     serial_init();
     serial_write("[BOOT] Kernel starting\n");
@@ -63,6 +94,12 @@ void kernel_main(uint64_t multiboot_info_addr) {
             serial_write("[PMM ] self-test passed\n");
         } else {
             serial_write("[PMM ] self-test FAILED\n");
+        }
+
+        if (vmm_self_test()) {
+            serial_write("[VMM ] self-test passed\n");
+        } else {
+            serial_write("[VMM ] self-test FAILED\n");
         }
     }
 

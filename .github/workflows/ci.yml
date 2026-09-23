@@ -33,6 +33,7 @@ jobs:
           grep -q "cpu_id=0" serial.log
           grep -q "\[PMM \] buddy allocator ready" serial.log
           grep -q "\[PMM \] self-test passed" serial.log
+          grep -q "\[VMM \] self-test passed" serial.log
 
       - name: Build fault-injection ISO (exercises IDT/ISR path)
         run: make iso-fault-test
