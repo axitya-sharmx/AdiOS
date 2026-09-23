@@ -5,7 +5,11 @@ CC := gcc
 AS := gcc
 CFLAGS := -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone -mcmodel=kernel -Wall -Wextra -c
 ASFLAGS := -c
-LDFLAGS := -T linker/linker.ld -ffreestanding -O2 -nostdlib -static
+# --build-id=none: ld otherwise injects a .note.gnu.build-id section as an
+# orphan at the very front of the image (ahead of our explicitly-placed
+# .boot), pushing the multiboot2 header's file offset past the 32 KiB
+# window GRUB scans for it once the kernel grows past a certain size.
+LDFLAGS := -T linker/linker.ld -ffreestanding -O2 -nostdlib -static -Wl,--build-id=none
 
 C_SOURCES := kernel/init/main.c kernel/logging/serial.c \
              arch/x86_64/cpu/gdt.c arch/x86_64/cpu/percpu.c \
@@ -16,7 +20,7 @@ C_SOURCES := kernel/init/main.c kernel/logging/serial.c \
              process/thread/thread.c process/scheduler/scheduler.c \
              arch/x86_64/syscall/syscall.c \
              kernel/object/object.c security/handles/handle.c \
-             sync/spinlock/spinlock.c
+             sync/spinlock/spinlock.c kernel/elf/elf.c
 ASM_SOURCES := arch/x86_64/boot/boot.S arch/x86_64/interrupts/isr_stubs.S \
                arch/x86_64/interrupts/irq_stubs.S arch/x86_64/cpu/switch.S \
                arch/x86_64/syscall/syscall_stub.S
