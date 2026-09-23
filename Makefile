@@ -11,7 +11,8 @@ C_SOURCES := kernel/init/main.c kernel/logging/serial.c kernel/logging/log.c ker
              kernel/panic/panic.c \
              arch/x86_64/cpu/gdt.c arch/x86_64/cpu/percpu.c \
              arch/x86_64/interrupts/idt.c arch/x86_64/interrupts/isr.c \
-             mm/pmm/multiboot2.c mm/pmm/pmm.c
+             mm/pmm/multiboot2.c mm/pmm/pmm.c \
+             drivers/pci/pci.c
 ASM_SOURCES := arch/x86_64/boot/boot.S arch/x86_64/interrupts/isr_stubs.S
 
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SOURCES)) \
@@ -50,10 +51,11 @@ iso-fault-test:
 	$(MAKE) clean
 	$(MAKE) iso CFLAGS="$(CFLAGS) -DTRIGGER_TEST_FAULT"
 
-test: $(BUILD_DIR)/test_string $(BUILD_DIR)/test_log $(BUILD_DIR)/test_list
+test: $(BUILD_DIR)/test_string $(BUILD_DIR)/test_log $(BUILD_DIR)/test_list $(BUILD_DIR)/test_pci
 	$(BUILD_DIR)/test_string
 	$(BUILD_DIR)/test_log
 	$(BUILD_DIR)/test_list
+	$(BUILD_DIR)/test_pci
 
 $(BUILD_DIR)/test_string: tests/unit/test_string.c kernel/core/string.c
 	@mkdir -p $(BUILD_DIR)
@@ -64,6 +66,10 @@ $(BUILD_DIR)/test_log: tests/unit/test_log.c kernel/logging/log.c kernel/logging
 	$(CC) -Wall -Wextra -o $@ $^
 
 $(BUILD_DIR)/test_list: tests/unit/test_list.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -Wall -Wextra -o $@ $^
+
+$(BUILD_DIR)/test_pci: tests/unit/test_pci.c drivers/pci/pci.c kernel/logging/log.c kernel/logging/serial.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -Wall -Wextra -o $@ $^
 

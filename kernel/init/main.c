@@ -1,9 +1,12 @@
+#include <stddef.h>
 #include <stdint.h>
 #include "../logging/serial.h"
 #include "../../arch/x86_64/cpu/gdt.h"
 #include "../../arch/x86_64/cpu/percpu.h"
 #include "../../arch/x86_64/interrupts/idt.h"
 #include "../../mm/pmm/pmm.h"
+#include "../../drivers/pci/pci.h"
+#include "../logging/log.h"
 
 static void serial_write_uint(uint64_t v) {
     char buf[21];
@@ -65,6 +68,11 @@ void kernel_main(uint64_t multiboot_info_addr) {
             serial_write("[PMM ] self-test FAILED\n");
         }
     }
+
+    struct pci_device pci_devices[PCI_MAX_DEVICES];
+    size_t pci_count = pci_enumerate(pci_devices, PCI_MAX_DEVICES);
+    kprintf("[PCI ] %u device(s) found\n", (unsigned int)pci_count);
+    pci_log_devices(pci_devices, pci_count);
 
     serial_write("[INIT] Kernel initialized\n");
 
