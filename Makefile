@@ -3,11 +3,11 @@ ISO_DIR := $(BUILD_DIR)/iso
 
 CC := gcc
 AS := gcc
-CFLAGS := -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone -mcmodel=kernel -Wall -Wextra -c
+CFLAGS := -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -mno-red-zone -mcmodel=kernel -Wall -Wextra -c
 ASFLAGS := -c
 LDFLAGS := -T linker/linker.ld -ffreestanding -O2 -nostdlib -static
 
-C_SOURCES := kernel/init/main.c kernel/logging/serial.c \
+C_SOURCES := kernel/init/main.c kernel/logging/serial.c kernel/core/string.c \
              arch/x86_64/cpu/gdt.c arch/x86_64/cpu/percpu.c \
              arch/x86_64/interrupts/idt.c arch/x86_64/interrupts/isr.c \
              mm/pmm/multiboot2.c mm/pmm/pmm.c
@@ -19,7 +19,7 @@ OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SOURCES)) \
 KERNEL := $(BUILD_DIR)/kernel.elf
 ISO := $(BUILD_DIR)/adios.iso
 
-.PHONY: all iso run clean
+.PHONY: all iso run test clean
 
 all: $(KERNEL)
 
@@ -48,6 +48,11 @@ run: iso
 iso-fault-test:
 	$(MAKE) clean
 	$(MAKE) iso CFLAGS="$(CFLAGS) -DTRIGGER_TEST_FAULT"
+
+test:
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -Wall -Wextra -o $(BUILD_DIR)/test_string tests/unit/test_string.c kernel/core/string.c
+	$(BUILD_DIR)/test_string
 
 clean:
 	rm -rf $(BUILD_DIR)
