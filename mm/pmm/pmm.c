@@ -1,0 +1,214 @@
+/* Buddy allocator over a single physical memory region (spec section 13).
+ *
+ * g_page_order[i] doubles as both the free/allocated bit and, when free,
+ * the order of the block starting at page i: PMM_ORDER_FREE_NONE means
+ * "not a free block head" (either allocated, or the interior of a larger
+ * free block). That single byte per page is what lets pmm_free() find a
+ * buddy and decide in O(1) whether it can coalesce with it.
+ */
+#include "pmm.h"
+#include "multiboot2.h"
+
+/* Provided by linker/linker.ld: the physical range this kernel image
+ * (code, rodata, data, bss, boot page tables/stack) actually occupies. */
+extern char _kernel_start[];
+extern char _kernel_end[];
+
+_Static_assert((PMM_PAGE_SIZE & (PMM_PAGE_SIZE - 1)) == 0, "PMM_PAGE_SIZE must be a power of two");
+
+/* Bounds the static bookkeeping array. Also keeps the managed region well
+ * inside the boot identity map (first 1 GiB, see boot.S). NUMA and
+ * multi-region support (spec section 14) come once there's hardware with
+ * more than one node to justify it. */
+#define PMM_MANAGED_CAP_BYTES (128ULL * 1024 * 1024)
+#define PMM_MAX_PAGES (PMM_MANAGED_CAP_BYTES / PMM_PAGE_SIZE)
+
+#define PMM_ORDER_FREE_NONE 0xFF
+_Static_assert(PMM_MAX_ORDER < PMM_ORDER_FREE_NONE, "PMM_ORDER_FREE_NONE must not collide with a real order");
+
+struct free_block {
+    struct free_block *prev;
+    struct free_block *next;
+};
+
+static uint64_t g_base;
+static uint64_t g_page_count;
+static uint8_t g_page_order[PMM_MAX_PAGES]; /* PMM_ORDER_FREE_NONE, or order if this page is a free block head */
+static struct free_block *g_free_list[PMM_MAX_ORDER + 1];
+static uint64_t g_free_bytes;
+static uint64_t g_total_bytes;
+
+static inline uint64_t block_bytes(uint32_t order) {
+    return (uint64_t)PMM_PAGE_SIZE << order;
+}
+
+static inline uint64_t page_index(uint64_t addr) {
+    return (addr - g_base) / PMM_PAGE_SIZE;
+}
+
+static void list_push(uint32_t order, uint64_t addr) {
+    struct free_block *node = (struct free_block *)addr;
+    node->prev = 0;
+    node->next = g_free_list[order];
+    if (g_free_list[order]) {
+        g_free_list[order]->prev = node;
+    }
+    g_free_list[order] = node;
+    g_page_order[page_index(addr)] = (uint8_t)order;
+}
+
+static void list_remove(uint32_t order, uint64_t addr) {
+    struct free_block *node = (struct free_block *)addr;
+    if (node->prev) {
+        node->prev->next = node->next;
+    } else {
+        g_free_list[order] = node->next;
+    }
+    if (node->next) {
+        node->next->prev = node->prev;
+    }
+    g_page_order[page_index(addr)] = PMM_ORDER_FREE_NONE;
+}
+
+static void add_free_region(uint64_t addr, uint64_t len) {
+    while (len >= PMM_PAGE_SIZE) {
+        uint32_t order = 0;
+        while (order < PMM_MAX_ORDER) {
+            uint64_t next_size = block_bytes(order + 1);
+            if ((addr % next_size) != 0 || next_size > len) {
+                break;
+            }
+            order++;
+        }
+        uint64_t size = block_bytes(order);
+        list_push(order, addr);
+        g_free_bytes += size;
+        g_total_bytes += size;
+        addr += size;
+        len -= size;
+    }
+}
+
+int pmm_init(uint64_t mb_info_addr) {
+    uint64_t base, len;
+    if (!multiboot2_find_largest_region(mb_info_addr, &base, &len)) {
+        return 0;
+    }
+
+    /* align base up, length down, to page size */
+    uint64_t aligned_base = (base + PMM_PAGE_SIZE - 1) & ~(uint64_t)(PMM_PAGE_SIZE - 1);
+    len -= (aligned_base - base);
+    base = aligned_base;
+    len &= ~(uint64_t)(PMM_PAGE_SIZE - 1);
+
+    if (len > PMM_MANAGED_CAP_BYTES) {
+        len = PMM_MANAGED_CAP_BYTES;
+    }
+
+    g_base = base;
+    g_page_count = len / PMM_PAGE_SIZE;
+    g_free_bytes = 0;
+    g_total_bytes = 0;
+
+    for (uint64_t i = 0; i < g_page_count; i++) {
+        g_page_order[i] = PMM_ORDER_FREE_NONE;
+    }
+    for (uint32_t o = 0; o <= PMM_MAX_ORDER; o++) {
+        g_free_list[o] = 0;
+    }
+
+    /* The Multiboot2 memory map only describes raw RAM availability — it
+     * has no idea GRUB loaded us somewhere inside it. Carve the kernel's
+     * own physical footprint out of the region before handing any of it
+     * out, or pmm_alloc will eventually return a page that's still our
+     * code, stack, or page tables. */
+    uint64_t kstart = (uint64_t)_kernel_start & ~(uint64_t)(PMM_PAGE_SIZE - 1);
+    uint64_t kend = ((uint64_t)_kernel_end + PMM_PAGE_SIZE - 1) & ~(uint64_t)(PMM_PAGE_SIZE - 1);
+
+    uint64_t region_end = base + len;
+    uint64_t overlap_start = kstart > base ? kstart : base;
+    uint64_t overlap_end = kend < region_end ? kend : region_end;
+
+    if (overlap_start < overlap_end) {
+        if (overlap_start > base) {
+            add_free_region(base, overlap_start - base);
+        }
+        if (overlap_end < region_end) {
+            add_free_region(overlap_end, region_end - overlap_end);
+        }
+    } else {
+        add_free_region(base, len);
+    }
+
+    return 1;
+}
+
+uint64_t pmm_alloc(uint32_t order) {
+    if (order > PMM_MAX_ORDER) {
+        return 0;
+    }
+
+    uint32_t found_order = order;
+    while (found_order <= PMM_MAX_ORDER && !g_free_list[found_order]) {
+        found_order++;
+    }
+    if (found_order > PMM_MAX_ORDER) {
+        return 0; /* out of memory at this order */
+    }
+
+    uint64_t addr = (uint64_t)g_free_list[found_order];
+    list_remove(found_order, addr);
+
+    /* split down to the requested order, pushing the unused buddy halves back */
+    while (found_order > order) {
+        found_order--;
+        uint64_t buddy = addr + block_bytes(found_order);
+        list_push(found_order, buddy);
+    }
+
+    g_free_bytes -= block_bytes(order);
+    return addr;
+}
+
+void pmm_free(uint64_t addr, uint32_t order) {
+    /* Guard the trust boundary: a bad (addr, order) from a caller bug must
+     * not corrupt g_page_order/free-list state for unrelated blocks. */
+    if (order > PMM_MAX_ORDER || addr < g_base || (addr - g_base) % block_bytes(order) != 0 ||
+        page_index(addr) + ((uint64_t)1 << order) > g_page_count) {
+        return;
+    }
+
+    /* Only the freed block's own bytes are newly free; any buddy we
+     * coalesce with was already free and already counted. */
+    g_free_bytes += block_bytes(order);
+
+    while (order < PMM_MAX_ORDER) {
+        /* Buddy blocks differ by exactly one bit at their own order's
+         * position, so XOR-ing that bit into the region-relative offset
+         * gives the buddy's offset directly. */
+        uint64_t buddy = g_base + ((addr - g_base) ^ block_bytes(order));
+
+        if (page_index(buddy) >= g_page_count) {
+            break;
+        }
+        if (g_page_order[page_index(buddy)] != order) {
+            break; /* buddy not free at this order: can't coalesce */
+        }
+
+        list_remove(order, buddy);
+        if (buddy < addr) {
+            addr = buddy;
+        }
+        order++;
+    }
+
+    list_push(order, addr);
+}
+
+uint64_t pmm_free_bytes(void) {
+    return g_free_bytes;
+}
+
+uint64_t pmm_total_bytes(void) {
+    return g_total_bytes;
+}

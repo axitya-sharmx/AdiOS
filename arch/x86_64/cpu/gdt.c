@@ -75,6 +75,10 @@ void gdt_init(void) {
 
     load_gdt(&g_gdt_ptr);
 
+    /* Reload every data segment from the new GDT, and CS via a far return
+     * (there's no direct far-jump-to-label form in AT&T inline asm) so the
+     * CPU actually starts using the new descriptors instead of the ones
+     * boot.S's temporary GDT left behind. */
     __asm__ volatile(
         "mov $0x10, %%ax\n"
         "mov %%ax, %%ds\n"
