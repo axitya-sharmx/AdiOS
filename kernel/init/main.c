@@ -9,6 +9,7 @@
 #include "../../arch/x86_64/time/pit.h"
 #include "../../process/thread/thread.h"
 #include "../../process/scheduler/scheduler.h"
+#include "../../arch/x86_64/syscall/syscall.h"
 
 static void serial_write_uint(uint64_t v) {
     char buf[21];
@@ -148,6 +149,27 @@ static void counter_worker(void *arg) {
     }
 }
 
+/* A real ring-3 caller needs the ELF loader (spec section 51, a later
+ * phase) to have anything to run. Until then, calling `int 0x80` from
+ * ring 0 itself already exercises the whole path this phase adds: the
+ * DPL3 gate accepts it (DPL only restricts less-privileged callers), the
+ * dispatcher looks up the table, and the handler's return value comes
+ * back exactly where a real caller would read it — rax after the
+ * instruction, restored by the stub's iretq. */
+static long test_syscall(struct registers *regs) {
+    (void)regs;
+    return 0x1337;
+}
+
+static int syscall_self_test(void) {
+    syscall_init();
+    syscall_register(0, test_syscall);
+
+    long result;
+    __asm__ volatile("int $0x80" : "=a"(result) : "a"(0) : "memory");
+    return result == 0x1337;
+}
+
 static int scheduler_self_test(void) {
     scheduler_init();
 
@@ -221,6 +243,12 @@ void kernel_main(uint64_t multiboot_info_addr) {
         serial_write("[SCHD] round-robin self-test passed\n");
     } else {
         serial_write("[SCHD] round-robin self-test FAILED\n");
+    }
+
+    if (syscall_self_test()) {
+        serial_write("[SYSC] int 0x80 self-test passed\n");
+    } else {
+        serial_write("[SYSC] int 0x80 self-test FAILED\n");
     }
 
     serial_write("[INIT] Kernel initialized\n");

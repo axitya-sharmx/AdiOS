@@ -13,9 +13,11 @@ C_SOURCES := kernel/init/main.c kernel/logging/serial.c \
              arch/x86_64/interrupts/pic.c arch/x86_64/interrupts/irq.c \
              arch/x86_64/time/pit.c \
              mm/pmm/multiboot2.c mm/pmm/pmm.c mm/vmm/vmm.c kernel/heap/heap.c \
-             process/thread/thread.c process/scheduler/scheduler.c
+             process/thread/thread.c process/scheduler/scheduler.c \
+             arch/x86_64/syscall/syscall.c
 ASM_SOURCES := arch/x86_64/boot/boot.S arch/x86_64/interrupts/isr_stubs.S \
-               arch/x86_64/interrupts/irq_stubs.S arch/x86_64/cpu/switch.S
+               arch/x86_64/interrupts/irq_stubs.S arch/x86_64/cpu/switch.S \
+               arch/x86_64/syscall/syscall_stub.S
 
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SOURCES)) \
            $(patsubst %.S,$(BUILD_DIR)/%.o,$(ASM_SOURCES))
