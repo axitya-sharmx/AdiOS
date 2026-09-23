@@ -20,9 +20,9 @@ jobs:
 
       - name: Diagnose ELF headers (temporary)
         run: |
-          readelf -h build/kernel.elf
-          readelf -l build/kernel.elf
-          ls -la build/kernel.elf
+          readelf -S build/kernel.elf
+          nm build/kernel.elf | grep -i 'multiboot\|_start\b'
+          xxd build/kernel.elf | head -20
 
       - name: Boot in QEMU and capture serial log
         run: |
