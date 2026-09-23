@@ -2,8 +2,16 @@ BUILD_DIR := build
 ISO_DIR := $(BUILD_DIR)/iso
 
 CC := gcc
+CXX := g++
 AS := gcc
 CFLAGS := -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone -mcmodel=kernel -Wall -Wextra -c
+# See OS_MASTER_SPEC.md §4.3: no exceptions/RTTI, no hosted-runtime
+# assumptions (static constructors need a real .init_array + a run-once
+# guard neither of which exist yet, so global constructors are unsupported
+# until that's wired up — avoid them for now).
+CXXFLAGS := -ffreestanding -fno-exceptions -fno-rtti -fno-threadsafe-statics \
+            -fno-use-cxa-atexit -fno-stack-protector -fno-pic -mno-red-zone \
+            -mcmodel=kernel -Wall -Wextra -std=c++20 -c
 ASFLAGS := -c
 LDFLAGS := -T linker/linker.ld -ffreestanding -O2 -nostdlib -static
 
@@ -12,23 +20,31 @@ C_SOURCES := kernel/init/main.c kernel/logging/serial.c \
              arch/x86_64/interrupts/idt.c arch/x86_64/interrupts/isr.c \
              arch/x86_64/interrupts/pic.c arch/x86_64/interrupts/irq.c \
              arch/x86_64/time/pit.c \
-             mm/pmm/multiboot2.c mm/pmm/pmm.c mm/vmm/vmm.c kernel/heap/heap.c
+             mm/pmm/multiboot2.c mm/pmm/pmm.c mm/vmm/vmm.c kernel/heap/heap.c \
+             sync/spinlock/spinlock.c
+CXX_SOURCES :=
 ASM_SOURCES := arch/x86_64/boot/boot.S arch/x86_64/interrupts/isr_stubs.S \
                arch/x86_64/interrupts/irq_stubs.S
+ 
 
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SOURCES)) \
+           $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(CXX_SOURCES)) \
            $(patsubst %.S,$(BUILD_DIR)/%.o,$(ASM_SOURCES))
 
 KERNEL := $(BUILD_DIR)/kernel.elf
 ISO := $(BUILD_DIR)/adios.iso
 
-.PHONY: all iso run clean
+.PHONY: all iso run test clean
 
 all: $(KERNEL)
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $< -o $@
+
+$(BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $< -o $@
 
 $(BUILD_DIR)/%.o: %.S
 	@mkdir -p $(dir $@)
@@ -51,6 +67,19 @@ run: iso
 iso-fault-test:
 	$(MAKE) clean
 	$(MAKE) iso CFLAGS="$(CFLAGS) -DTRIGGER_TEST_FAULT"
+
+test: $(BUILD_DIR)/test_spinlock $(BUILD_DIR)/test_spinlock_guard
+	$(BUILD_DIR)/test_spinlock
+	$(BUILD_DIR)/test_spinlock_guard
+
+$(BUILD_DIR)/test_spinlock: tests/unit/test_spinlock.c sync/spinlock/spinlock.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -Wall -Wextra -o $@ $^
+
+$(BUILD_DIR)/test_spinlock_guard: tests/unit/test_spinlock_guard.cpp sync/spinlock/spinlock.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -Wall -Wextra -c sync/spinlock/spinlock.c -o $(BUILD_DIR)/host_spinlock.o
+	$(CXX) -std=c++20 -Wall -Wextra tests/unit/test_spinlock_guard.cpp $(BUILD_DIR)/host_spinlock.o -o $@
 
 clean:
 	rm -rf $(BUILD_DIR)
