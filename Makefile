@@ -7,8 +7,9 @@ CFLAGS := -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone -mcmodel=ke
 ASFLAGS := -c
 LDFLAGS := -T linker/linker.ld -ffreestanding -O2 -nostdlib -static
 
-C_SOURCES := kernel/init/main.c kernel/logging/serial.c
-ASM_SOURCES := arch/x86_64/boot/boot.S
+C_SOURCES := kernel/init/main.c kernel/logging/serial.c \
+             arch/x86_64/cpu/gdt.c arch/x86_64/interrupts/idt.c arch/x86_64/interrupts/isr.c
+ASM_SOURCES := arch/x86_64/boot/boot.S arch/x86_64/interrupts/isr_stubs.S
 
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SOURCES)) \
            $(patsubst %.S,$(BUILD_DIR)/%.o,$(ASM_SOURCES))
@@ -39,6 +40,12 @@ iso: $(KERNEL)
 
 run: iso
 	qemu-system-x86_64 -cdrom $(ISO) -serial stdio -display none -no-reboot -no-shutdown
+
+# Exercises the IDT/ISR path: triggers INT3 after init and expects the fault
+# dump on serial instead of the normal idle loop.
+iso-fault-test:
+	$(MAKE) clean
+	$(MAKE) iso CFLAGS="$(CFLAGS) -DTRIGGER_TEST_FAULT"
 
 clean:
 	rm -rf $(BUILD_DIR)
