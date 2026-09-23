@@ -18,6 +18,12 @@ jobs:
       - name: Build ISO
         run: make iso
 
+      - name: Diagnose ELF headers (temporary)
+        run: |
+          readelf -h build/kernel.elf
+          readelf -l build/kernel.elf
+          ls -la build/kernel.elf
+
       - name: Boot in QEMU and capture serial log
         run: |
           timeout 20 qemu-system-x86_64 -cdrom build/adios.iso -serial file:serial.log \
