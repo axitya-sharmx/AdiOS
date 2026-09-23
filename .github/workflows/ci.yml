@@ -38,6 +38,7 @@ jobs:
           grep -q "\[SYSC\] int 0x80 self-test passed" serial.log
           grep -q "\[HNDL\] handle/capability self-test passed" serial.log
           grep -q "\[SYNC\] spinlock self-test passed" serial.log
+          grep -q "\[ELF \] loader self-test passed" serial.log
 
       - name: Build fault-injection ISO (exercises IDT/ISR path)
         run: make iso-fault-test

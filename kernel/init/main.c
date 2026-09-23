@@ -13,6 +13,7 @@
 #include "../object/object.h"
 #include "../../security/handles/handle.h"
 #include "../../sync/spinlock/spinlock.h"
+#include "../elf/elf.h"
 
 static void serial_write_uint(uint64_t v) {
     char buf[21];
@@ -272,6 +273,101 @@ static int spinlock_self_test(void) {
     return 1;
 }
 
+/* Hand-built minimal ELF64 executable (one PT_LOAD segment: a 16-byte
+ * marker plus zero-filled bss out to a full page), constructed via C
+ * struct assignment rather than a hand-encoded byte table so the field
+ * layout/endianness can't be transcribed wrong — x86-64 is already
+ * little-endian, so a normal struct write *is* an ELF64LSB-correct write.
+ * The field layout here must match kernel/elf/elf.c's own (private)
+ * struct definitions byte-for-byte; elf_load() only ever sees this as a
+ * raw buffer, so as long as both sides agree on layout it doesn't matter
+ * that they're separate definitions. */
+struct test_elf_image {
+    struct {
+        uint8_t e_ident[16];
+        uint16_t e_type;
+        uint16_t e_machine;
+        uint32_t e_version;
+        uint64_t e_entry;
+        uint64_t e_phoff;
+        uint64_t e_shoff;
+        uint32_t e_flags;
+        uint16_t e_ehsize;
+        uint16_t e_phentsize;
+        uint16_t e_phnum;
+        uint16_t e_shentsize;
+        uint16_t e_shnum;
+        uint16_t e_shstrndx;
+    } __attribute__((packed)) ehdr;
+    struct {
+        uint32_t p_type;
+        uint32_t p_flags;
+        uint64_t p_offset;
+        uint64_t p_vaddr;
+        uint64_t p_paddr;
+        uint64_t p_filesz;
+        uint64_t p_memsz;
+        uint64_t p_align;
+    } __attribute__((packed)) phdr;
+    uint8_t marker[16];
+} __attribute__((packed));
+
+/* 0x42000000 is past the 1 GiB boot.S identity-maps with huge pages (same
+ * reason the VMM/heap self-tests picked their own addresses up there),
+ * and clear of both of those (0x40000000, 0x50000000+). */
+#define ELF_TEST_VADDR 0x42000000ULL
+
+static int elf_self_test(void) {
+    struct test_elf_image img = {0};
+
+    img.ehdr.e_ident[0] = 0x7F;
+    img.ehdr.e_ident[1] = 'E';
+    img.ehdr.e_ident[2] = 'L';
+    img.ehdr.e_ident[3] = 'F';
+    img.ehdr.e_ident[4] = 2; /* ELFCLASS64 */
+    img.ehdr.e_ident[5] = 1; /* ELFDATA2LSB */
+    img.ehdr.e_type = 2;     /* ET_EXEC */
+    img.ehdr.e_machine = 62; /* EM_X86_64 */
+    img.ehdr.e_version = 1;
+    img.ehdr.e_entry = ELF_TEST_VADDR;
+    img.ehdr.e_phoff = sizeof(img.ehdr);
+    img.ehdr.e_ehsize = sizeof(img.ehdr);
+    img.ehdr.e_phentsize = sizeof(img.phdr);
+    img.ehdr.e_phnum = 1;
+
+    img.phdr.p_type = 1; /* PT_LOAD */
+    img.phdr.p_flags = 6; /* PF_R | PF_W */
+    img.phdr.p_offset = sizeof(img.ehdr) + sizeof(img.phdr);
+    img.phdr.p_vaddr = ELF_TEST_VADDR;
+    img.phdr.p_filesz = sizeof(img.marker);
+    img.phdr.p_memsz = 4096; /* one page: rest must come back zeroed (bss) */
+    img.phdr.p_align = 4096;
+
+    for (int i = 0; i < 16; i++) {
+        img.marker[i] = (uint8_t)(0xA0 + i);
+    }
+
+    uint64_t entry = 0;
+    if (!elf_load((const uint8_t *)&img, sizeof(img), &entry)) {
+        return 0;
+    }
+    if (entry != ELF_TEST_VADDR) {
+        return 0;
+    }
+
+    const uint8_t *loaded = (const uint8_t *)ELF_TEST_VADDR;
+    for (int i = 0; i < 16; i++) {
+        if (loaded[i] != (uint8_t)(0xA0 + i)) {
+            return 0; /* segment data didn't land correctly */
+        }
+    }
+    if (loaded[16] != 0 || loaded[100] != 0 || loaded[4095] != 0) {
+        return 0; /* bss beyond filesz wasn't zeroed */
+    }
+
+    return 1;
+}
+
 void kernel_main(uint64_t multiboot_info_addr) {
     serial_init();
     serial_write("[BOOT] Kernel starting\n");
@@ -346,6 +442,12 @@ void kernel_main(uint64_t multiboot_info_addr) {
         serial_write("[SYNC] spinlock self-test passed\n");
     } else {
         serial_write("[SYNC] spinlock self-test FAILED\n");
+    }
+
+    if (elf_self_test()) {
+        serial_write("[ELF ] loader self-test passed\n");
+    } else {
+        serial_write("[ELF ] loader self-test FAILED\n");
     }
 
     serial_write("[INIT] Kernel initialized\n");
