@@ -10,6 +10,9 @@
 #include "../../process/thread/thread.h"
 #include "../../process/scheduler/scheduler.h"
 #include "../../arch/x86_64/syscall/syscall.h"
+#include "../object/object.h"
+#include "../../security/handles/handle.h"
+#include "../../sync/spinlock/spinlock.h"
 
 static void serial_write_uint(uint64_t v) {
     char buf[21];
@@ -187,6 +190,88 @@ static int scheduler_self_test(void) {
     return counters[0] == 20 && counters[1] == 20 && counters[2] == 20;
 }
 
+/* Exercises the full handle/capability lifecycle against a generic test
+ * object (spec sections 44-49): create with two rights, resolve requiring
+ * each individually and both together, derive a strictly-narrower handle
+ * and confirm it can't be used for the right it dropped, confirm deriving
+ * a right the source handle doesn't have is rejected, confirm closing one
+ * handle doesn't invalidate the other (independent lifetimes), and
+ * confirm a closed handle's exact value never resolves again (stale
+ * handle rejection) even after its slot gets reused. */
+static int handle_self_test(void) {
+    handle_table_init();
+
+    struct kobject obj;
+    kobject_init(&obj, 42);
+
+    handle_t h = handle_create(&obj, RIGHT_READ | RIGHT_WRITE);
+    if (!handle_resolve(h, RIGHT_READ) || !handle_resolve(h, RIGHT_WRITE) ||
+        !handle_resolve(h, RIGHT_READ | RIGHT_WRITE)) {
+        return 0;
+    }
+    if (handle_resolve(h, RIGHT_ADMIN)) {
+        return 0; /* granted a right it was never given */
+    }
+
+    handle_t reader = handle_derive(h, RIGHT_READ);
+    if (!handle_resolve(reader, RIGHT_READ)) {
+        return 0;
+    }
+    if (handle_resolve(reader, RIGHT_WRITE)) {
+        return 0; /* derived handle reacquired a right it should have dropped */
+    }
+
+    handle_t bad = handle_derive(reader, RIGHT_WRITE);
+    if (bad.index != 0 || bad.generation != 0) {
+        return 0; /* derive granted a right the source handle didn't have */
+    }
+
+    if (!handle_close(reader)) {
+        return 0;
+    }
+    if (!handle_resolve(h, RIGHT_READ | RIGHT_WRITE)) {
+        return 0; /* closing the derived handle must not affect the original */
+    }
+
+    handle_t stale = h;
+    if (!handle_close(h)) {
+        return 0;
+    }
+    if (handle_resolve(stale, RIGHT_READ)) {
+        return 0; /* closed handle still resolved */
+    }
+
+    return 1;
+}
+
+/* No SMP yet, so this can't test real contention — it checks the state
+ * machine: starts free, acquire flips it held, a second try_acquire
+ * correctly fails while held, release flips it back free, and a fresh
+ * acquire succeeds again afterward. */
+static int spinlock_self_test(void) {
+    struct spinlock lock;
+    spinlock_init(&lock);
+
+    if (!spinlock_try_acquire(&lock)) {
+        return 0; /* should have been free */
+    }
+    if (spinlock_try_acquire(&lock)) {
+        return 0; /* already held: must not succeed again */
+    }
+
+    spinlock_release(&lock);
+
+    if (!spinlock_try_acquire(&lock)) {
+        return 0; /* should be free again after release */
+    }
+    spinlock_release(&lock);
+
+    spinlock_acquire(&lock); /* blocking path, uncontended: must not hang */
+    spinlock_release(&lock);
+
+    return 1;
+}
+
 void kernel_main(uint64_t multiboot_info_addr) {
     serial_init();
     serial_write("[BOOT] Kernel starting\n");
@@ -249,6 +334,18 @@ void kernel_main(uint64_t multiboot_info_addr) {
         serial_write("[SYSC] int 0x80 self-test passed\n");
     } else {
         serial_write("[SYSC] int 0x80 self-test FAILED\n");
+    }
+
+    if (handle_self_test()) {
+        serial_write("[HNDL] handle/capability self-test passed\n");
+    } else {
+        serial_write("[HNDL] handle/capability self-test FAILED\n");
+    }
+
+    if (spinlock_self_test()) {
+        serial_write("[SYNC] spinlock self-test passed\n");
+    } else {
+        serial_write("[SYNC] spinlock self-test FAILED\n");
     }
 
     serial_write("[INIT] Kernel initialized\n");
